@@ -1,0 +1,166 @@
+
+#!/bin/bash
+DEBUG=0
+TOP=0
+ZIP=0
+DISP=10
+
+function debug() {
+  if [[ $DEBUG -eq 1 ]]
+  then
+    echo "$*"
+  fi 
+}
+
+
+
+function usage() {
+    cat <<EOF    
+Usage: $0 [OPTIONS] <logfile> 
+    -i IP address (regex) 
+    -t date hour regex filter, complete format DD/Month/YY:hh:mm:ss (regex)  
+    -s HTTP Status Code (regex) 
+    -V DEBUG set -x 
+    -v show DEBUG variabe 
+    -u page relative uri  
+    -m method HTTP (POST/GET)
+    -z unzip the file directly 
+
+    -T top result {number of results} without filter 
+EOF
+}
+
+
+function main() {
+
+debug "IP $ip"
+debug "HTTP TYPE $error_type"
+debug "LOG PATH $logpath"
+debug "METHOD $method"
+debug "ZIP $ZIP"
+
+debug "MAIN $1"
+
+if [[ -z $1 ]]; then
+ usage
+ exit 0
+fi
+  
+logpath=$1
+
+if [ ! -f "$logpath" ]; then
+ echo "File does not exist" 
+ exit 2
+fi
+
+if [[ $ZIP -eq 1 && $(file -b --mime-type $logpath) == "application/zip" ]]; then
+  zipfilepath=$logpath
+  $logpath < $(unzip -p $zipfilepath)
+  exit 3
+fi
+
+
+if [[ $TOP -eq 1 ]]; then
+
+echo "top $DISP ip"
+cut -d " " -f 2 "$logpath" | sort | uniq -c | sort -n | tail -n $DISP
+
+echo "top $DISP urls"
+awk '{printf "%s http://%s%s\n", $2, $1,$8}' "$logpath" | sort | uniq -c | sort -n | tail -n $DISP
+
+
+echo "top $DISP  php urls"
+awk '$8 ~ /\.php/ {printf "%s http://%s%s\n", $2, $1,$8}' "$logpath"| sort | uniq -c | sort -n | tail -n $DISP
+
+echo "top $DISP  POST"
+awk '$7 == "\"POST" {printf "%s http://%s%s\n", $2, $1,$8}' "$logpath"| sort | uniq -c | sort -n | tail -n $DISP
+
+
+else
+
+cat "$logpath"  | 
+([ -z "$ip" ] || awk -v "ip=$ip" '{if ($2 ~ ip) print  }' && tee) |  
+([ -z "$error_type" ] || awk -v "error=$error_type" '{if ($10 ~ error) print }' && tee) | 
+([ -z "$hour" ] || awk -v hour="$hour" '{ if (substr($5,13,8) ~ hour) print }' && tee) | 
+([ -z "$method" ] || awk -v method="\"$method" '{if ($7==method) print }' && tee) |
+([ -z "$url" ] || awk -v url="$url" '{if ($8 ~ url) print }' && tee) 
+
+fi
+
+}
+
+
+
+while getopts "i:s:t:m:hvVzT:u:" opt; do
+  debug "OPTION $opt"
+
+    case $opt in
+        V)
+         
+         set -x
+        ;;
+        v)
+         DEBUG=1
+        ;;
+        i)
+          debug "ARGUMENT $OPTARG"
+          ip=$OPTARG
+        ;;
+        s)
+          debug "ARGUMENT $OPTARG"
+          error_type=$OPTARG
+        ;;
+        t)
+          debug "ARGUMENT $OPTARG"
+          hour=$OPTARG
+        ;;
+        m)
+          debug "ARGUMENT $OPTARG"
+          method=$OPTARG 
+          ;;
+        h)
+          usage
+          exit 0
+        ;;
+
+        T)
+          TOP=1
+          debug "ARGUMENT $OPTARG"
+          DISP=$OPTARG  
+        ;;
+        u)
+          debug "ARGUMENT $OPTARG"
+          url=$OPTARG  
+         
+        ;;
+
+        z)
+         ZIP=1
+        ;;
+        
+       \? )
+        echo "Invalid option: $OPTARG" 1>&2
+        ;;
+        : )
+        echo "Invalid option: $OPTARG requires an argument" 1>&2
+        ;;
+
+        *)  
+            usage
+            exit 0
+            ;;
+    esac
+done
+
+if [ $# -eq 0 ]; then
+    echo "No arguments provided"
+    usage
+    exit 1
+fi
+debug "OPTIND $OPTIND"
+
+shift $(($OPTIND - 1))
+
+main $@
+
+
